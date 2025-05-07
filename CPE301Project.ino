@@ -4,17 +4,6 @@
 #include <Stepper.h>
 #include <DHT.h>
 
-
-//THRESHOLD TEMP about 24Celcius
-//THRESHOLD WATERLVL 
-
-
-
-
-
-
-
-
 //LCD -------------------
 LiquidCrystal lcd(31, 33, 35, 37, 39, 41);
 
@@ -26,114 +15,197 @@ char daysOfTheWeek[7][12] = { "Sunday", "Monday", "Tuesday", "Wednesday", "Thurs
 const int stepsPerRevolution = 2048;
 Stepper myStepper(stepsPerRevolution, 7, 6, 5, 4);
 
+#define VENT_POT A0
+int lastVentPos = -1;
+
+
 //Humidity Sensor --------------
 #define DHTPIN 2         // Pin connected to DHT sensor
 #define DHTTYPE DHT11    // Change to DHT22 if needed
 DHT dht(DHTPIN, DHTTYPE);
 
 
+// Fan --------------
+#define FAN_PIN 9
+
+// Water Sensor --------------
+#define WATER_SENSOR A8
+
+// LEDS --------------
+#define LED_DISABLED 22
+#define LED_IDLE     23
+#define LED_ERROR    24
+#define LED_RUNNING  25
+
+// Buttons ----------------
+#define START_BUTTON 3
+#define STOP_BUTTON  18
+#define RESET_BUTTON 19
+
+// Thresholds -------------
+#define TEMP_THRESHOLD 24.0
+#define WATER_THRESHOLD 140
+
+// States
+enum State {DISABLED, IDLE, ERROR, RUNNING};
+State currState = DISABLED;
+
+volatile bool startPressed = false;
+
+void startISR() {
+  startPressed = true;
+}
+
+
 void setup() {
 Serial.begin(9600);
  URTCLIB_WIRE.begin();
-  //lcd code ---------------
-  lcd.begin(16, 2);              // Set up the LCD's number of columns and rows
-  lcd.print("Hello, World!");    // Print message to the LCD
-
-  //RTC Code ----------------
-  rtc.set(0, 15, 4, 1, 4, 5, 25);
-  // rtc.set(second, minute, hour, dayOfWeek, dayOfMonth, month, year)
-  // set day of week (1=Sunday, 7=Saturday)
-
-  //Stepper Motor ------------
-  myStepper.setSpeed(15);  // You can adjust the speed here
-  Serial.begin(9600);
-
-  //LCD W Humid Sensor ----------------
+  //Startup ---------------
+  lcd.begin(16, 2);   
+  lcd.print("Initializing...");   
   dht.begin();
-  lcd.begin(16, 2);  // Set up 16 columns and 2 rows
-  lcd.print("Initializing...");
-  delay(2000);
-  lcd.clear();
+  myStepper.setSpeed(15);
 
-  //Water Sensor(Serial Monitor)
+
+  pinMode(FAN_PIN, OUTPUT);
+  pinMode(WATER_SENSOR, INPUT);
+
+  pinMode(START_BUTTON, INPUT);
+  pinMode(STOP_BUTTON, INPUT);
+  pinMode(RESET_BUTTON, INPUT);
+
+  attachInterrupt(digitalPinToInterrupt(START_BUTTON), startISR, FALLING);
+
+  pinMode(LED_DISABLED, OUTPUT);
+  pinMode(LED_IDLE, OUTPUT);
+  pinMode(LED_ERROR, OUTPUT);
+  pinMode(LED_RUNNING, OUTPUT);
+
+  updateState(DISABLED);
 
 }
 
 void loop() {
-  //RTC Loop Code ------------------
-   rtc.refresh();
+  rtc.refresh();
 
-  Serial.print("Current Date & Time: ");
-  Serial.print(rtc.year());
-  Serial.print('/');
-  Serial.print(rtc.month());
-  Serial.print('/');
-  Serial.print(rtc.day());
-
-  Serial.print(" (");
-  byte dow = rtc.dayOfWeek();
-  if(dow >= 1 && dow <= 7){
-    Serial.print(daysOfTheWeek[dow - 1]);
-  } else {
-    Serial.print("Unknown");
-  }
-  Serial.print(") ");
-
-  Serial.print(rtc.hour());
-  Serial.print(':');
-  Serial.print(rtc.minute());
-  Serial.print(':');
-  Serial.println(rtc.second());
-
-  delay(5000);
-
-  //Stepper Motor Code ----------------
-  // Rotate one full revolution clockwise:
-  myStepper.step(stepsPerRevolution);
-  delay(1000);
-
-  // Rotate one full revolution counterclockwise:
-  myStepper.step(-stepsPerRevolution);
-  delay(1000);
-
-  //LCD with Humid Sensor -----------------
   float temp = dht.readTemperature();
-  float hum = dht.readHumidity();
+  float hum =  dht.readHumidity();
+  int waterLvl = analogRead(WATER_SENSOR);
 
-  // Check if reading failed
-  if (isnan(temp) || isnan(hum)) {
-    lcd.setCursor(0, 0);
-    lcd.print("Sensor error   ");
+  if (isnan(temp) || isnan(hum)) return;
+
+  // Start button
+  if (startPressed && currState == DISABLED) {
+    startPressed = false;
+    updateState(IDLE);
+  }
+
+  // Stop Button
+  if (digitalRead(STOP_BUTTON) == LOW && currState != ERROR) {
+    updateState(DISABLED);
+    return;
+  } 
+
+  // Water Level
+
+  if (currState != DISABLED && waterLvl < WATER_THRESHOLD) {
+    updateState(ERROR);
     return;
   }
 
-  // Display Temperature
-  lcd.setCursor(0, 0);
-  lcd.print("Temp: ");
-  lcd.print(temp);
-  lcd.print((char)223); // degree symbol
-  lcd.print("C");
-
-  // Display Humidity
-  lcd.setCursor(0, 1);
-  lcd.print("Humidity: ");
-  lcd.print(hum);
-  lcd.print("%");
-
-  delay(500);
-
-  //Water Sensor
-  int sensorValue = analogRead(A8);
-  Serial.print("Water Level Reading: ");
-  Serial.println(sensorValue);
-
-  if(sensorValue > 220){
-    Serial.println("Water Level: HIGH");
-  } else if (sensorValue > 140){
-    Serial.println("Water Level: MEDIUM");
-  } else {
-    Serial.println("Water Level: LOW");
+  // Reset Button
+  if (digitalRead(RESET_BUTTON) == LOW && currState == ERROR && analogRead(WATER_SENSOR) >= WATER_THRESHOLD) {
+    updateState(IDLE);
+    return;
   }
 
-  delay(500);
+
+
+
+  // LCD usual:
+  if (currState != ERROR && currState != DISABLED) {
+    lcd.setCursor(0, 0);
+    lcd.print("Temp: "); lcd.print(temp); lcd.print((char)223); /* degree symbol */ lcd.print("C   ");
+    lcd.setCursor(0, 1);
+    lcd.print("Hum: "); lcd.print(hum); lcd.print("%    ");
+  }
+
+  if (currState != DISABLED) {
+    int potVal = analogRead(VENT_POT);
+    int targetPos = map(potVal, 0, 1023, 0, stepsPerRevolution);
+
+    if (abs(targetPos - lastVentPos) > 10) {
+      int diff = targetPos - lastVentPos;
+      myStepper.step(diff);
+      lastVentPos = targetPos;
+
+      rtc.refresh();
+      
+      Serial.print("\n");
+      Serial.print("[Vent Moved At @ ");
+      Serial.print(rtc.hour()); Serial.print(":");
+      Serial.print(rtc.minute()); Serial.print(":");
+      Serial.print(rtc.second()); Serial.print("]");
+      Serial.print("\n");
+    }
+  }
+
+
+  // State Logic
+  switch(currState) {
+    case IDLE:
+      if (temp > TEMP_THRESHOLD) {
+        updateState(RUNNING);
+      }
+      break;
+    case RUNNING:
+      digitalWrite(FAN_PIN, HIGH);
+      if (temp <= TEMP_THRESHOLD) {
+        digitalWrite(FAN_PIN, LOW);
+        updateState(IDLE);
+      }
+      break;
+    case ERROR:
+    case DISABLED:
+      digitalWrite(FAN_PIN, LOW);
+      break;
+  }
 }
+
+void updateState(State newState) {
+  currState = newState;
+  rtc.refresh();
+
+  Serial.print("\n");
+  Serial.print("[STATE CHANGE @ ");
+  Serial.print(rtc.hour()); Serial.print(":");
+  Serial.print(rtc.minute()); Serial.print(":");
+  Serial.print(rtc.second()); Serial.print("]");
+  Serial.print("\n");
+
+  digitalWrite(LED_DISABLED, newState == DISABLED);
+  digitalWrite(LED_IDLE, newState == IDLE);
+  digitalWrite(LED_ERROR, newState == ERROR);
+  digitalWrite(LED_RUNNING, newState == RUNNING);
+  
+  switch(newState) {
+    case DISABLED:
+      lcd.clear();
+      lcd.print("System Disabled");
+      break;
+    case IDLE:
+      lcd.clear();
+      lcd.print("System Idle");
+      break;
+    case ERROR:
+      lcd.clear();
+      lcd.print("System Error: No Water");
+      break;
+    case RUNNING:
+      lcd.clear();
+      lcd.print("Cooling Active");
+      break;
+  }
+}
+
+  
