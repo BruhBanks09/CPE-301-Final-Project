@@ -46,7 +46,7 @@ DHT dht(DHTPIN, DHTTYPE);
 #define TEMP_THRESHOLD 24.0
 #define WATER_THRESHOLD 140
 
-// States
+// States -------------
 enum State {DISABLED, IDLE, ERROR, RUNNING};
 State currState = DISABLED;
 
@@ -60,9 +60,9 @@ void startISR() {
 void setup() {
 Serial.begin(9600);
  URTCLIB_WIRE.begin();
+
   //Startup ---------------
   lcd.begin(16, 2);   
-  lcd.print("Initializing...");   
   dht.begin();
   myStepper.setSpeed(15);
 
@@ -81,9 +81,20 @@ Serial.begin(9600);
   pinMode(LED_ERROR, OUTPUT);
   pinMode(LED_RUNNING, OUTPUT);
 
+  ADMUX = 0b01001000; 
+  ADCSRA = 0b10000111;
+
   updateState(DISABLED);
 
 }
+
+uint16_t readWaterLevel() {
+  ADMUX = (ADMUX & 0xF0) | 0x08; 
+  ADCSRA |= (1 << ADSC);         
+  while (ADCSRA & (1 << ADSC)); 
+  return ADC;
+}
+
 
 void loop() {
   rtc.refresh();
