@@ -1,6 +1,7 @@
 CPE 301 - Swamp Cooler Final Project
 Jalen B, Jeongsu S, Kaiden B.
 5/9/25
+TEAM 35
 
 Circuit diagram located - 
 https://app.cirkitdesigner.com/project/34e78cf0-ef58-4158-820f-8a8033867706 - 
